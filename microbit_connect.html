@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>micro:bit 按鍵監測器</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      padding: 2rem;
+      max-width: 600px;
+      margin: auto;
+      background-color: #f4f6f8;
+      color: #333;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 1.5rem;
+    }
+    button {
+      padding: 14px 24px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 10px;
+      border: none;
+      transition: background 0.2s;
+    }
+    #connectBtn {
+      background-color: #007aff;
+      color: white;
+    }
+    #connectBtn:disabled {
+      background-color: #a0cfff;
+      cursor: not-allowed;
+    }
+    #disconnectBtn {
+      background-color: #ff3b30;
+      color: white;
+    }
+    #disconnectBtn:disabled {
+      background-color: #ffb3ae;
+      cursor: not-allowed;
+    }
+    #status {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+      color: #555;
+    }
+    .display-card {
+      background: white;
+      border-radius: 16px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    #messageBox {
+      font-size: 36px;
+      font-weight: 800;
+      color: #007aff;
+      min-height: 50px;
+      margin-bottom: 0.5rem;
+    }
+    #timestamp {
+      font-size: 14px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>micro:bit 藍牙按鍵監測</h2>
+  
+  <div class="controls">
+    <button id="connectBtn">連接 micro:bit</button>
+    <button id="disconnectBtn" disabled>中斷連線</button>
+  </div>
+
+  <div id="status">狀態：尚未連線</div>
+
+  <div class="display-card">
+    <div id="messageBox">等待按鍵觸發...</div>
+    <div id="timestamp">尚未收到任何訊號</div>
+  </div>
+
+  <script>
+    const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const UART_TX_CHARACTERISTIC_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+    let bluetoothDevice = null;
+    let rxTextBuffer = '';
+
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const statusText = document.getElementById('status');
+    const messageBox = document.getElementById('messageBox');
+    const timestampText = document.getElementById('timestamp');
+
+    connectBtn.addEventListener('click', async () => {
+      try {
+        statusText.innerText = '狀態：正在搜尋裝置...';
+
+        bluetoothDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: 'BBC micro:bit' }],
+          optionalServices: [UART_SERVICE_UUID]
+        });
+
+        bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+        statusText.innerText = '狀態：連線中...';
+        const server = await bluetoothDevice.gatt.connect();
+        const service = await server.getPrimaryService(UART_SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(UART_TX_CHARACTERISTIC_UUID);
+
+        await characteristic.startNotifications();
+        characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+        statusText.innerText = '狀態：已連線 (' + bluetoothDevice.name + ')';
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+
+      } catch (error) {
+        console.error(error);
+        statusText.innerText = '狀態：連線取消或失敗 (' + error.message + ')';
+      }
+    });
+
+    function handleData(event) {
+      const value = event.target.value;
+      const decoder = new TextDecoder('utf-8');
+      rxTextBuffer += decoder.decode(value);
+
+      // 檢查是否收到換行符號 (\n 或 \r\n)
+      if (rxTextBuffer.includes('\n')) {
+        const lines = rxTextBuffer.split('\n');
+        const command = lines[lines.length - 2].trim();
+        rxTextBuffer = lines[lines.length - 1];
+
+        updateScreen(command);
+      }
+    }
+
+    function updateScreen(command) {
+      const now = new Date().toLocaleTimeString('zh-HK');
+
+      if (command === 'BTN_A') {
+        messageBox.innerText = 'A鍵按下';
+        messageBox.style.color = '#34c759'; // 綠色強調
+      } else if (command === 'BTN_B') {
+        messageBox.innerText = 'B鍵按下';
+        messageBox.style.color = '#ff9500'; // 橙色強調
+      } else {
+        // 若未來傳送其他自訂文字，直接顯示原文
+        messageBox.innerText = command;
+        messageBox.style.color = '#007aff';
+      }
+
+      timestampText.innerText = '最後觸發時間：' + now;
+    }
+
+    disconnectBtn.addEventListener('click', () => {
+      if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+        bluetoothDevice.gatt.disconnect();
+      }
+    });
+
+    function onDisconnected() {
+      statusText.innerText = '狀態：已中斷連線';
+      connectBtn.disabled = false;
+      disconnectBtn.disabled = true;
+    }
+  </script>
+</body>
+</html>
