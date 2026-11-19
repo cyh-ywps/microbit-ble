@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>micro:bit 按鍵監測器</title>
+  <title>micro:bit 感應器與按鍵監測</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -25,53 +25,47 @@
       cursor: pointer;
       border-radius: 10px;
       border: none;
-      transition: background 0.2s;
     }
-    #connectBtn {
-      background-color: #007aff;
-      color: white;
-    }
-    #connectBtn:disabled {
-      background-color: #a0cfff;
-      cursor: not-allowed;
-    }
-    #disconnectBtn {
-      background-color: #ff3b30;
-      color: white;
-    }
-    #disconnectBtn:disabled {
-      background-color: #ffb3ae;
-      cursor: not-allowed;
-    }
-    #status {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 1.5rem;
-      color: #555;
+    #connectBtn { background-color: #007aff; color: white; }
+    #connectBtn:disabled { background-color: #a0cfff; }
+    #disconnectBtn { background-color: #ff3b30; color: white; }
+    #disconnectBtn:disabled { background-color: #ffb3ae; }
+    #status { font-size: 16px; font-weight: 600; margin-bottom: 1.5rem; color: #555; }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
     }
     .display-card {
       background: white;
       border-radius: 16px;
-      padding: 2.5rem 1.5rem;
+      padding: 1.8rem 1rem;
       text-align: center;
       box-shadow: 0 4px 12px rgba(0,0,0,0.08);
     }
-    #messageBox {
-      font-size: 36px;
+    .card-title {
+      font-size: 15px;
+      color: #666;
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+    .card-value {
+      font-size: 32px;
       font-weight: 800;
       color: #007aff;
-      min-height: 50px;
-      margin-bottom: 0.5rem;
+      min-height: 45px;
+      margin-bottom: 8px;
     }
-    #timestamp {
-      font-size: 14px;
-      color: #888;
+    .timestamp {
+      font-size: 13px;
+      color: #999;
     }
   </style>
 </head>
 <body>
 
-  <h2>micro:bit 藍牙按鍵監測</h2>
+  <h2>micro:bit 藍牙即時監測</h2>
   
   <div class="controls">
     <button id="connectBtn">連接 micro:bit</button>
@@ -80,9 +74,20 @@
 
   <div id="status">狀態：尚未連線</div>
 
-  <div class="display-card">
-    <div id="messageBox">等待按鍵觸發...</div>
-    <div id="timestamp">尚未收到任何訊號</div>
+  <div class="grid">
+    <!-- 左邊卡片：專門顯示按鍵 -->
+    <div class="display-card">
+      <div class="card-title">按鍵狀態</div>
+      <div id="btnDisplay" class="card-value">等待中...</div>
+      <div id="btnTime" class="timestamp">--</div>
+    </div>
+
+    <!-- 右邊卡片：專門顯示光線亮度 -->
+    <div class="display-card">
+      <div class="card-title">環境亮度 (0-255)</div>
+      <div id="lightDisplay" class="card-value" style="color: #ff9500;">--</div>
+      <div id="lightTime" class="timestamp">--</div>
+    </div>
   </div>
 
   <script>
@@ -95,13 +100,15 @@
     const connectBtn = document.getElementById('connectBtn');
     const disconnectBtn = document.getElementById('disconnectBtn');
     const statusText = document.getElementById('status');
-    const messageBox = document.getElementById('messageBox');
-    const timestampText = document.getElementById('timestamp');
+    
+    const btnDisplay = document.getElementById('btnDisplay');
+    const btnTime = document.getElementById('btnTime');
+    const lightDisplay = document.getElementById('lightDisplay');
+    const lightTime = document.getElementById('lightTime');
 
     connectBtn.addEventListener('click', async () => {
       try {
         statusText.innerText = '狀態：正在搜尋裝置...';
-
         bluetoothDevice = await navigator.bluetooth.requestDevice({
           filters: [{ namePrefix: 'BBC micro:bit' }],
           optionalServices: [UART_SERVICE_UUID]
@@ -132,32 +139,36 @@
       const decoder = new TextDecoder('utf-8');
       rxTextBuffer += decoder.decode(value);
 
-      // 檢查是否收到換行符號 (\n 或 \r\n)
-      if (rxTextBuffer.includes('\n')) {
-        const lines = rxTextBuffer.split('\n');
-        const command = lines[lines.length - 2].trim();
-        rxTextBuffer = lines[lines.length - 1];
+      // 只要緩衝區內有換行符號，就逐行處理（避免多條訊息黏在一起時漏掉）
+      while (rxTextBuffer.includes('\n')) {
+        const newlineIndex = rxTextBuffer.indexOf('\n');
+        const command = rxTextBuffer.slice(0, newlineIndex).trim();
+        rxTextBuffer = rxTextBuffer.slice(newlineIndex + 1);
 
-        updateScreen(command);
+        if (command) {
+          routeMessage(command);
+        }
       }
     }
 
-    function updateScreen(command) {
+    // 根據訊息開頭分流到不同的顯示卡片
+    function routeMessage(command) {
       const now = new Date().toLocaleTimeString('zh-HK');
 
       if (command === 'BTN_A') {
-        messageBox.innerText = 'A鍵按下';
-        messageBox.style.color = '#34c759'; // 綠色強調
+        btnDisplay.innerText = 'A 鍵按下';
+        btnDisplay.style.color = '#34c759';
+        btnTime.innerText = '觸發時間：' + now;
       } else if (command === 'BTN_B') {
-        messageBox.innerText = 'B鍵按下';
-        messageBox.style.color = '#ff9500'; // 橙色強調
-      } else {
-        // 若未來傳送其他自訂文字，直接顯示原文
-        messageBox.innerText = command;
-        messageBox.style.color = '#007aff';
+        btnDisplay.innerText = 'B 鍵按下';
+        btnDisplay.style.color = '#007aff';
+        btnTime.innerText = '觸發時間：' + now;
+      } else if (command.startsWith('Light:')) {
+        // 擷取 "Light:" 後面的數字
+        const lightValue = command.split(':')[1];
+        lightDisplay.innerText = lightValue;
+        lightTime.innerText = '更新時間：' + now;
       }
-
-      timestampText.innerText = '最後觸發時間：' + now;
     }
 
     disconnectBtn.addEventListener('click', () => {
